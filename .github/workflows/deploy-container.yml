@@ -1,0 +1,79 @@
+name: CI/CD - Build and deploy container
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-oidc: true
+
+      - name: Deploy infrastructure (Bicep)
+        id: deploy_infra
+        run: |
+          az deployment group create \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --template-file infra/main.bicep \
+            --parameters namePrefix="${{ secrets.NAME_PREFIX }}" \
+            --parameters location="${{ secrets.AZURE_LOCATION }}" \
+            -o json > deployment.json
+          cat deployment.json
+
+      - name: Parse infra outputs
+        id: parse
+        run: |
+          cat deployment.json | jq '.properties.outputs' > outputs.json
+          echo "acrLoginServer=$(jq -r '.acrLoginServer.value' outputs.json)" >> $GITHUB_OUTPUT
+          echo "acrName=$(jq -r '.acrName.value' outputs.json)" >> $GITHUB_OUTPUT
+          echo "webAppName=$(jq -r '.webAppName.value' outputs.json)" >> $GITHUB_OUTPUT
+
+      - name: Get ACR credentials
+        id: acr_creds
+        run: |
+          ACR_NAME=${{ steps.parse.outputs.acrName }}
+          RG=${{ secrets.AZURE_RESOURCE_group }}
+          CREDS=$(az acr credential show -n $ACR_NAME -g $RG -o json)
+          echo "acrUsername=$(echo $CREDS | jq -r .username)" >> $GITHUB_OUTPUT
+          echo "acrPassword=$(echo $CREDS | jq -r '.passwords[0].value')" >> $GITHUB_OUTPUT
+
+      - name: Login to ACR
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ steps.parse.outputs.acrLoginServer }}
+          username: ${{ steps.acr_creds.outputs.acrUsername }}
+          password: ${{ steps.acr_creds.outputs.acrPassword }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.parse.outputs.acrLoginServer }}/${{ steps.parse.outputs.acrName }}:${{ github.sha }}
+
+      - name: Deploy image to Web App for Containers
+        run: |
+          IMAGE=${{ steps.parse.outputs.acrLoginServer }}/${{ steps.parse.outputs.acrName }}:${{ github.sha }}
+          az webapp config container set \
+            --name "${{ steps.parse.outputs.webAppName }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --docker-custom-image-name "$IMAGE" \
+            --docker-registry-server-url "https://${{ steps.parse.outputs.acrLoginServer }}" \
+            --docker-registry-server-user "${{ steps.acr_creds.outputs.acrUsername }}" \
+            --docker-registry-server-password "${{ steps.acr_creds.outputs.acrPassword }}"
