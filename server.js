@@ -51,7 +51,11 @@ async function detectRegion() {
 
 app.get('/api/region', async (req, res) => {
   const region = await detectRegion();
-  res.json({ region });
+  const xff = req.headers['x-forwarded-for'] || null;
+  const remoteAddr = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : null;
+  // Prefer the first entry of X-Forwarded-For when present, otherwise use the remote socket address
+  const clientIp = xff ? xff.split(',')[0].trim() : remoteAddr;
+  res.json({ region, clientIp, xForwardedFor: xff, remoteAddress: remoteAddr });
 });
 
 app.listen(port, () => {

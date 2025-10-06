@@ -20,7 +20,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2021-02-01' = {
     tier: 'Basic'
     capacity: 1
   }
-  kind: 'linux'
+  kind: 'app,linux,container'
 }
 
 resource webApp 'Microsoft.Web/sites@2021-02-01' = {
