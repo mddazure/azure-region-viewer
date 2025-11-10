@@ -1,22 +1,144 @@
-Azure Region Viewer
+# Azure Region and Client IP Viewer
 
-A minimal single-page app that shows the Azure region where it is deployed.
+A minimal single-page web application that displays both the Azure region where it's deployed and the client's IP address (IPv4 and IPv6). This app is particularly useful for testing network configurations, load balancers, and understanding client IP behavior in different Azure deployment scenarios.
 
-Getting started
+## Features
 
-1. Install dependencies: npm install
-2. Run locally: npm start
-3. Open http://localhost:3000
+- **Azure Region Detection**: Automatically detects the Azure region using environment variables and Azure Instance Metadata Service (IMDS)
+- **Client IP Display**: Shows the requesting client's IP address with proper IPv4/IPv6 support
+- **Clean IP Formatting**: 
+  - Removes port numbers from IP addresses
+  - Handles IPv4-mapped IPv6 addresses (`::ffff:192.168.1.1` → `192.168.1.1`)
+  - Displays full IPv6 addresses without truncation
+- **Multiple Deployment Support**: Works with direct VM deployment, load balancers, proxies, and container services
+- **Dual-Stack Networking**: Supports both IPv4 and IPv6 clients
+- **Responsive UI**: Clean, modern interface that works on all devices
 
-How region is detected
+## Getting Started Locally
 
-- The server first checks environment variables (AZURE_REGION, REGION_NAME, WEBSITE_REGION, etc.).
-- If not found it attempts to call the Azure Instance Metadata Service (IMDS) at 169.254.169.254 to read compute.location.
-- If none of the above are available the API returns "local".
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-Deploying
+2. **Run the application:**
+   ```bash
+   npm start
+   ```
 
-This app can be deployed to Azure App Service or as a container. Set the AZURE_REGION environment variable if your hosting platform does not expose region information directly.
+3. **Open in browser:**
+   ```
+   http://localhost:3000
+   ```
+
+## How Region Detection Works
+
+The server attempts to detect the Azure region in this order:
+1. **Environment variables**: `AZURE_REGION`, `REGION_NAME`, `WEBSITE_REGION`, `REGION`, `LOCATION`
+2. **Azure Instance Metadata Service (IMDS)**: Calls `169.254.169.254/metadata/instance` to read `compute.location`
+3. **Fallback**: Returns "local" if running outside Azure or detection fails
+
+## Client IP Detection
+
+The application uses advanced client IP detection that works across different deployment scenarios:
+
+- **Proxy Headers**: Checks `X-Forwarded-For`, `X-Real-IP`, `X-Client-IP`, and other common headers
+- **Azure-Specific Headers**: Supports `X-Azure-ClientIP` and other Azure load balancer headers
+- **Direct Connection**: Falls back to socket connection information when no proxy headers are present
+- **Private IP Detection**: Identifies when showing Docker bridge or private network IPs vs real client IPs
+
+## Docker Images
+
+Two optimized Docker images are available on Docker Hub:
+
+### Standard Image: `madedroo/azure-region-viewer:latest`
+- **Use case**: Behind load balancers, proxies, Azure Container Instances
+- **Client IP source**: HTTP headers (X-Forwarded-For, etc.)
+- **Networking**: Standard Docker bridge networking
+- **IPv6 Support**: Limited to proxy-forwarded connections
+
+### Host Network Image: `madedroo/azure-region-viewer:hostnet` 
+- **Use case**: Direct VM deployment with public IPs
+- **Client IP source**: Direct socket connections + HTTP headers
+- **Networking**: Host networking mode (shares VM's network stack)
+- **IPv6 Support**: Full dual-stack IPv4/IPv6 support
+- **Why needed**: Preserves real client IPs, prevents Docker bridge network interference
+
+## Deployment Scenarios
+
+### 1. Behind Azure Application Gateway / Load Balancer
+```bash
+docker run -p 3000:3000 madedroo/azure-region-viewer:latest
+```
+- ✅ Client IP comes from `X-Forwarded-For` header
+- ✅ Works with both IPv4 and IPv6 clients
+- ✅ Standard container networking
+
+### 2. Direct VM with Public IP (Recommended for IPv6)
+```bash
+docker run --network=host madedroo/azure-region-viewer:hostnet
+```
+- ✅ Real client IPs preserved (no Docker bridge interference)
+- ✅ Full IPv6 support - container listens on `:::3000`
+- ✅ No port mapping needed (uses host network directly)
+- ✅ Ideal for testing IPv6 connectivity
+
+### 3. Azure Container Instances
+```bash
+# ACI automatically handles client IP forwarding
+az container create --resource-group myRG --name myapp \
+  --image madedroo/azure-region-viewer:latest \
+  --ports 80 --ip-address Public
+```
+- ✅ ACI provides automatic client IP detection
+- ✅ Works with standard image
+
+### 4. With nginx Reverse Proxy (SSL Termination)
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host $host;
+}
+```
+
+## Key Technical Improvements
+
+### IPv6 Support Enhancements
+- **Problem**: Container only listened on IPv4 (`0.0.0.0`), IPv6 clients couldn't connect
+- **Solution**: Changed binding to `::` for dual-stack IPv4/IPv6 support
+- **Result**: Both `curl -4 localhost:3000` and `curl -6 localhost:3000` now work
+
+### Client IP Detection Fixes
+- **Problem**: Docker bridge networking caused IPv6 clients to show as `172.17.0.1`
+- **Solution**: Host network mode + enhanced IP detection logic
+- **Result**: Real IPv6 client addresses properly displayed
+
+### IP Address Display Improvements
+- **IPv6 Port Handling**: Removes port numbers from IPv6 addresses (e.g., `2001:db8::1:5000` → `2001:db8::1`)
+- **IPv4-Mapped IPv6 Cleanup**: Converts `::ffff:192.168.1.1` to `192.168.1.1`
+- **Full IPv6 Display**: No more truncation of long IPv6 addresses
+
+### Enhanced Debugging
+The `/api/region` endpoint now provides comprehensive debugging information:
+```json
+{
+  "region": "eastus",
+  "clientIp": "2001:db8::1",
+  "isPrivateIP": false,
+  "connectionInfo": {
+    "remoteAddress": "2001:db8::1",
+    "remoteFamily": "IPv6"
+  },
+  "allHeaders": {
+    "x-forwarded-for": null,
+    "x-real-ip": null
+  },
+  "deploymentAdvice": "Public IP detected successfully"
+}
+```
 
 ## Azure deployment (ACR + Web App for Containers)
 
@@ -60,7 +182,53 @@ Notes about setup (high level):
 
 2. Push to the `main` branch to trigger the workflow. The workflow will deploy the infra and publish the container image.
 
+## API Endpoint
+
+**GET `/api/region`**
+
+Returns JSON with region and client IP information:
+```json
+{
+  "region": "eastus",
+  "clientIp": "2001:db8::1",
+  "xForwardedFor": null,
+  "remoteAddress": "2001:db8::1", 
+  "isPrivateIP": false,
+  "expressIp": "2001:db8::1",
+  "connectionInfo": {
+    "remoteAddress": "2001:db8::1",
+    "remoteFamily": "IPv6",
+    "localAddress": ":::",
+    "localPort": 3000
+  },
+  "allHeaders": {
+    "x-forwarded-for": null,
+    "x-real-ip": null,
+    "x-client-ip": null
+  },
+  "deploymentAdvice": "Public IP detected successfully"
+}
+```
+
+## Environment Variables
+
+- `PORT`: Server port (default: 3000)
+- `HOST`: Bind address (default: `::` for dual-stack)
+- `AZURE_REGION`: Override region detection
+- Any of: `REGION_NAME`, `WEBSITE_REGION`, `REGION`, `LOCATION`
+
+## Building from Source
+
+```bash
+# Standard image
+docker build -t azure-region-viewer:latest .
+
+# Host network optimized image  
+docker build -f Dockerfile.hostnet -t azure-region-viewer:hostnet .
+```
+
 Security notes:
 
 - The Bicep template enables the ACR admin user for simplicity. For production, prefer using managed identities and assigning the AcrPull role to the Web App's principal instead of using admin credentials.
 - Review the GitHub Actions workflow and replace any placeholders with your real values. Use least privilege principles for service principals.
+- When using host network mode, the container shares the host's network stack - ensure proper firewall configuration.
