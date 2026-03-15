@@ -31,6 +31,51 @@ A minimal single-page web application that displays both the Azure region where 
    http://localhost:3000
    ```
 
+## Entra-authenticated app variant (application code)
+
+This repository now includes a separate server variant with app-level Microsoft Entra authentication:
+
+- `server.entra.js` (does not modify existing `server.js` behavior)
+- `npm run start:entra` / `npm run dev:entra`
+- `.env.entra.example` for required configuration
+
+### Required environment variables
+
+- `ENTRA_TENANT_ID`
+- `ENTRA_CLIENT_ID`
+- `ENTRA_CLIENT_SECRET`
+- `ENTRA_REDIRECT_URI` **or** `PUBLIC_BASE_URL`
+
+If `ENTRA_REDIRECT_URI` is not set, callback defaults to:
+
+`<PUBLIC_BASE_URL>/auth/callback`
+
+This allows forcing the callback host to your Application Gateway public FQDN.
+
+### Entra app registration setup
+
+For the app registration used by `server.entra.js`:
+
+- Add Web redirect URI: `https://<your-public-host>/auth/callback`
+- Add post-logout redirect URI if desired
+- Ensure ID token issuance is enabled
+
+### Run
+
+```bash
+npm run start:entra
+```
+
+### Run with Docker (Entra variant)
+
+```bash
+# Build dedicated Entra image
+docker build -f Dockerfile.entra -t azure-region-viewer:entra .
+
+# Run with your Entra environment variables
+docker run --env-file .env.entra -p 3000:3000 azure-region-viewer:entra
+```
+
 ## How Region Detection Works
 
 The server attempts to detect the Azure region in this order:
@@ -225,6 +270,12 @@ docker build -t azure-region-viewer:latest .
 
 # Host network optimized image  
 docker build -f Dockerfile.hostnet -t azure-region-viewer:hostnet .
+
+# Entra auth app-level image
+docker build -f Dockerfile.entra -t azure-region-viewer:entra .
+
+# Entra auth + host network optimized image
+docker build -f Dockerfile.hostnet.entra -t azure-region-viewer:hostnet-entra .
 ```
 
 Security notes:

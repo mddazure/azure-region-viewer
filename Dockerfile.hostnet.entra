@@ -1,0 +1,14 @@
+# Host-network optimized image for Entra-authenticated app variant
+FROM node:18-alpine
+WORKDIR /usr/src/app
+COPY package.json package-lock.json* ./
+RUN npm install --production
+COPY . .
+
+# Default port - can be overridden with ENV var
+ENV PORT=3000
+# Use :: for dual-stack IPv4/IPv6 support
+ENV HOST=::
+
+# No EXPOSE needed in host network mode - app uses host's network directly
+CMD ["node", "server.entra.js"]
