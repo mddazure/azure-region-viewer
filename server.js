@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const os = require('os');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -71,6 +72,14 @@ async function detectRegionAndVmName() {
   return {
     region: 'local',
     vmName: null
+  };
+}
+
+function getRuntimeIdentity(vmName) {
+  return {
+    vmName,
+    podName: process.env.POD_NAME || process.env.HOSTNAME || os.hostname() || null,
+    nodeName: process.env.NODE_NAME || null
   };
 }
 
@@ -148,7 +157,7 @@ function isPrivateIP(ip) {
 app.get('/api/region', async (req, res) => {
   const runtimeMetadata = await detectRegionAndVmName();
   const region = runtimeMetadata.region;
-  const vmName = runtimeMetadata.vmName;
+  const runtimeIdentity = getRuntimeIdentity(runtimeMetadata.vmName);
   const clientIp = getClientIp(req);
   const xff = req.headers['x-forwarded-for'] || null;
   const remoteAddr = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : null;
@@ -156,7 +165,9 @@ app.get('/api/region', async (req, res) => {
   
   res.json({ 
     region, 
-    vmName,
+    vmName: runtimeIdentity.vmName,
+    podName: runtimeIdentity.podName,
+    nodeName: runtimeIdentity.nodeName,
     clientIp, 
     xForwardedFor: xff, 
     remoteAddress: remoteAddr,

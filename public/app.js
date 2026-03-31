@@ -9,6 +9,14 @@ async function loadRegion() {
     if (vmNameEl) {
       vmNameEl.textContent = `VM: ${data.vmName || 'unknown'}`;
     }
+    const nodeNameEl = document.getElementById('node-name');
+    if (nodeNameEl) {
+      nodeNameEl.textContent = `Node: ${data.nodeName || 'unknown'}`;
+    }
+    const podNameEl = document.getElementById('pod-name');
+    if (podNameEl) {
+      podNameEl.textContent = `Pod: ${data.podName || 'unknown'}`;
+    }
     const ipEl = document.getElementById('client-ip');
     if (ipEl) {
       let ip = data.clientIp || data.xForwardedFor || data.remoteAddress || 'unknown';
@@ -43,6 +51,10 @@ async function loadRegion() {
     el.textContent = 'error detecting region';
     const vmNameEl = document.getElementById('vm-name');
     if (vmNameEl) vmNameEl.textContent = 'VM: error';
+    const nodeNameEl = document.getElementById('node-name');
+    if (nodeNameEl) nodeNameEl.textContent = 'Node: error';
+    const podNameEl = document.getElementById('pod-name');
+    if (podNameEl) podNameEl.textContent = 'Pod: error';
     const ipEl = document.getElementById('client-ip');
     if (ipEl) ipEl.textContent = 'error';
   }

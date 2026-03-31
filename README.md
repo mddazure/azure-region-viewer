@@ -1,11 +1,12 @@
 # Azure Region and Client IP Viewer
 
-A minimal single-page web application that displays the Azure region where it's deployed, the Azure VM name when available, and the client's IP address (IPv4 and IPv6). This app is useful for testing network configurations, load balancers, Microsoft Entra-protected ingress paths, and client IP behavior in different Azure deployment scenarios.
+A minimal single-page web application that displays the Azure region where it's deployed, the Azure VM name when available, the AKS node and pod names when provided by Kubernetes, and the client's IP address (IPv4 and IPv6). This app is useful for testing network configurations, load balancers, Microsoft Entra-protected ingress paths, and client IP behavior in different Azure deployment scenarios.
 
 ## Features
 
 - **Azure Region Detection**: Automatically detects the Azure region using environment variables and Azure Instance Metadata Service (IMDS)
 - **VM Name Display**: Shows the Azure VM name when available from IMDS metadata
+- **AKS Node and Pod Display**: Shows the Kubernetes node name and pod name when `NODE_NAME` and `POD_NAME` are provided
 - **Client IP Display**: Shows the requesting client's IP address with proper IPv4/IPv6 support
 - **Optional Entra Authentication Variant**: Includes a dedicated server and Docker variants that protect the UI and API with Microsoft Entra ID
 - **Clean IP Formatting**: 
@@ -111,6 +112,24 @@ For direct VM or dual-stack host-network deployments, use the host-network Entra
 docker build -f Dockerfile.hostnet.entra -t azure-region-viewer:hostnet-entra .
 docker run --env-file .env.entra --network=host azure-region-viewer:hostnet-entra
 ```
+
+### Run in Kubernetes
+
+To show the Kubernetes pod and node names in the UI and `/api/region`, pass these environment variables into the container:
+
+```yaml
+env:
+  - name: POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+  - name: NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+```
+
+If these variables aren't set, the app falls back to the container hostname for the pod name and leaves the node name empty.
 
 ## How Region Detection Works
 
@@ -253,7 +272,7 @@ The `/api/region` endpoint now provides comprehensive debugging information:
 }
 ```
 
-The browser UI also renders the VM name when IMDS returns `compute.vmName`.
+The browser UI also renders the VM name when IMDS returns `compute.vmName`, and it renders the AKS pod and node names when Kubernetes provides them through environment variables.
 
 ## Azure deployment (ACR + Web App for Containers)
 
@@ -301,11 +320,13 @@ Notes about setup (high level):
 
 **GET `/api/region`**
 
-Returns JSON with region, VM name, and client IP information:
+Returns JSON with region, VM name, AKS node and pod names, and client IP information:
 ```json
 {
   "region": "eastus",
   "vmName": "region-viewer-vm01",
+  "podName": "azure-region-viewer-7f9c6c8d5b-8m2kq",
+  "nodeName": "aks-userpool-12345678-vmss000001",
   "clientIp": "2001:db8::1",
   "xForwardedFor": null,
   "remoteAddress": "2001:db8::1", 
@@ -328,6 +349,8 @@ Returns JSON with region, VM name, and client IP information:
 
 In the Entra-authenticated variant, this endpoint requires sign-in.
 
+For AKS deployments, `podName` and `nodeName` come from the Kubernetes Downward API environment variables shown earlier.
+
 ### Entra auth endpoints
 
 - `GET /healthz`: Liveness check and auth configuration status
@@ -342,6 +365,8 @@ In the Entra-authenticated variant, this endpoint requires sign-in.
 - `HOST`: Bind address (default: `::` for dual-stack)
 - `AZURE_REGION`: Override region detection
 - Any of: `REGION_NAME`, `WEBSITE_REGION`, `REGION`, `LOCATION`
+- `POD_NAME`: Optional Kubernetes pod name for display in the UI and API
+- `NODE_NAME`: Optional Kubernetes node name for display in the UI and API
 
 Entra variant environment variables:
 
