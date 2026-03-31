@@ -5,6 +5,10 @@ async function loadRegion() {
     if (!resp.ok) throw new Error('network');
     const data = await resp.json();
     el.textContent = data.region || 'unknown';
+    const vmNameEl = document.getElementById('vm-name');
+    if (vmNameEl) {
+      vmNameEl.textContent = `VM: ${data.vmName || 'unknown'}`;
+    }
     const ipEl = document.getElementById('client-ip');
     if (ipEl) {
       let ip = data.clientIp || data.xForwardedFor || data.remoteAddress || 'unknown';
@@ -37,6 +41,8 @@ async function loadRegion() {
     }
   } catch (err) {
     el.textContent = 'error detecting region';
+    const vmNameEl = document.getElementById('vm-name');
+    if (vmNameEl) vmNameEl.textContent = 'VM: error';
     const ipEl = document.getElementById('client-ip');
     if (ipEl) ipEl.textContent = 'error';
   }

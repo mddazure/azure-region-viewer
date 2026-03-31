@@ -1,4 +1,8 @@
 node_modules/
 .env
+.env.entra
+.env.entra.local
+.env.entra.example
+az containerapp create -n region-viewer-.cli
 .DS_Store
 npm-debug.log

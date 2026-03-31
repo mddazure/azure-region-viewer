@@ -1,11 +1,13 @@
 # Azure Region and Client IP Viewer
 
-A minimal single-page web application that displays both the Azure region where it's deployed and the client's IP address (IPv4 and IPv6). This app is particularly useful for testing network configurations, load balancers, and understanding client IP behavior in different Azure deployment scenarios.
+A minimal single-page web application that displays the Azure region where it's deployed, the Azure VM name when available, and the client's IP address (IPv4 and IPv6). This app is useful for testing network configurations, load balancers, Microsoft Entra-protected ingress paths, and client IP behavior in different Azure deployment scenarios.
 
 ## Features
 
 - **Azure Region Detection**: Automatically detects the Azure region using environment variables and Azure Instance Metadata Service (IMDS)
+- **VM Name Display**: Shows the Azure VM name when available from IMDS metadata
 - **Client IP Display**: Shows the requesting client's IP address with proper IPv4/IPv6 support
+- **Optional Entra Authentication Variant**: Includes a dedicated server and Docker variants that protect the UI and API with Microsoft Entra ID
 - **Clean IP Formatting**: 
   - Removes port numbers from IP addresses
   - Handles IPv4-mapped IPv6 addresses (`::ffff:192.168.1.1` → `192.168.1.1`)
@@ -15,6 +17,8 @@ A minimal single-page web application that displays both the Azure region where 
 - **Responsive UI**: Clean, modern interface that works on all devices
 
 ## Getting Started Locally
+
+### Standard variant
 
 1. **Install dependencies:**
    ```bash
@@ -31,13 +35,37 @@ A minimal single-page web application that displays both the Azure region where 
    http://localhost:3000
    ```
 
-## Entra-authenticated app variant (application code)
+### Entra-authenticated variant
+
+1. **Install dependencies:**
+  ```bash
+  npm install
+  ```
+
+2. **Use `.env.entra.example` as a template for the required values.**
+
+3. **Set the environment variables in your shell and start the Entra server variant.**
+   PowerShell example:
+   ```powershell
+   $env:ENTRA_TENANT_ID = "<tenant-id>"
+   $env:ENTRA_CLIENT_ID = "<client-id>"
+   $env:ENTRA_CLIENT_SECRET = "<client-secret>"
+   $env:PUBLIC_BASE_URL = "http://localhost:3000"
+   $env:SESSION_COOKIE_SECURE = "false"
+   npm run start:entra
+   ```
+
+The Entra variant protects the static app and `/api/region`. Unauthenticated browser requests are redirected to `/login`, and signed-in user info is available from `/api/me`.
+
+## Entra-authenticated variants
 
 This repository now includes a separate server variant with app-level Microsoft Entra authentication:
 
 - `server.entra.js` (does not modify existing `server.js` behavior)
 - `npm run start:entra` / `npm run dev:entra`
-- `.env.entra.example` for required configuration
+- `Dockerfile.entra` for the standard container image
+- `Dockerfile.hostnet.entra` for direct VM and host-network deployments
+- `.env.entra.example` as a template for required configuration values
 
 ### Required environment variables
 
@@ -63,6 +91,7 @@ For the app registration used by `server.entra.js`:
 ### Run
 
 ```bash
+# Set the required ENTRA_* variables in your shell first
 npm run start:entra
 ```
 
@@ -76,11 +105,18 @@ docker build -f Dockerfile.entra -t azure-region-viewer:entra .
 docker run --env-file .env.entra -p 3000:3000 azure-region-viewer:entra
 ```
 
+For direct VM or dual-stack host-network deployments, use the host-network Entra variant:
+
+```bash
+docker build -f Dockerfile.hostnet.entra -t azure-region-viewer:hostnet-entra .
+docker run --env-file .env.entra --network=host azure-region-viewer:hostnet-entra
+```
+
 ## How Region Detection Works
 
 The server attempts to detect the Azure region in this order:
 1. **Environment variables**: `AZURE_REGION`, `REGION_NAME`, `WEBSITE_REGION`, `REGION`, `LOCATION`
-2. **Azure Instance Metadata Service (IMDS)**: Calls `169.254.169.254/metadata/instance` to read `compute.location`
+2. **Azure Instance Metadata Service (IMDS)**: Calls `169.254.169.254/metadata/instance` to read `compute.location` and `compute.vmName`
 3. **Fallback**: Returns "local" if running outside Azure or detection fails
 
 ## Client IP Detection
@@ -109,6 +145,17 @@ Two optimized Docker images are available on Docker Hub:
 - **IPv6 Support**: Full dual-stack IPv4/IPv6 support
 - **Why needed**: Preserves real client IPs, prevents Docker bridge network interference
 
+## Dockerfile variants in this repository
+
+The source tree supports four runtime variants:
+
+| Variant | Server | Dockerfile | Auth | Recommended use |
+|---|---|---|---|---|
+| Standard | `server.js` | `Dockerfile` | No | App Gateway, load balancer, ACI, App Service |
+| Standard host network | `server.js` | `Dockerfile.hostnet` | No | Direct VM deployment with public IPv4/IPv6 |
+| Entra-authenticated | `server.entra.js` | `Dockerfile.entra` | Yes | Protected ingress through App Gateway or reverse proxy |
+| Entra-authenticated host network | `server.entra.js` | `Dockerfile.hostnet.entra` | Yes | Protected direct VM deployment with host networking |
+
 ## Deployment Scenarios
 
 ### 1. Behind Azure Application Gateway / Load Balancer
@@ -119,6 +166,16 @@ docker run -p 3000:3000 madedroo/azure-region-viewer:latest
 - ✅ Works with both IPv4 and IPv6 clients
 - ✅ Standard container networking
 
+Entra-authenticated equivalent:
+
+```bash
+docker build -f Dockerfile.entra -t azure-region-viewer:entra .
+docker run --env-file .env.entra -p 3000:3000 azure-region-viewer:entra
+```
+
+- ✅ Browser users are redirected to Microsoft Entra sign-in before the UI loads
+- ✅ `/api/region` remains protected behind the same session
+
 ### 2. Direct VM with Public IP (Recommended for IPv6)
 ```bash
 docker run --network=host madedroo/azure-region-viewer:hostnet
@@ -127,6 +184,16 @@ docker run --network=host madedroo/azure-region-viewer:hostnet
 - ✅ Full IPv6 support - container listens on `:::3000`
 - ✅ No port mapping needed (uses host network directly)
 - ✅ Ideal for testing IPv6 connectivity
+
+Entra-authenticated equivalent:
+
+```bash
+docker build -f Dockerfile.hostnet.entra -t azure-region-viewer:hostnet-entra .
+docker run --env-file .env.entra --network=host azure-region-viewer:hostnet-entra
+```
+
+- ✅ Preserves direct client IP visibility and VM metadata
+- ✅ Adds sign-in before serving the UI and API
 
 ### 3. Azure Container Instances
 ```bash
@@ -171,6 +238,7 @@ The `/api/region` endpoint now provides comprehensive debugging information:
 ```json
 {
   "region": "eastus",
+  "vmName": "region-viewer-vm01",
   "clientIp": "2001:db8::1",
   "isPrivateIP": false,
   "connectionInfo": {
@@ -184,6 +252,8 @@ The `/api/region` endpoint now provides comprehensive debugging information:
   "deploymentAdvice": "Public IP detected successfully"
 }
 ```
+
+The browser UI also renders the VM name when IMDS returns `compute.vmName`.
 
 ## Azure deployment (ACR + Web App for Containers)
 
@@ -231,10 +301,11 @@ Notes about setup (high level):
 
 **GET `/api/region`**
 
-Returns JSON with region and client IP information:
+Returns JSON with region, VM name, and client IP information:
 ```json
 {
   "region": "eastus",
+  "vmName": "region-viewer-vm01",
   "clientIp": "2001:db8::1",
   "xForwardedFor": null,
   "remoteAddress": "2001:db8::1", 
@@ -255,12 +326,35 @@ Returns JSON with region and client IP information:
 }
 ```
 
+In the Entra-authenticated variant, this endpoint requires sign-in.
+
+### Entra auth endpoints
+
+- `GET /healthz`: Liveness check and auth configuration status
+- `GET /login`: Starts the Microsoft Entra sign-in flow
+- `GET /auth/callback`: Handles the authorization code callback
+- `GET /logout`: Ends the local session and redirects to Entra logout
+- `GET /api/me`: Returns basic signed-in user claims
+
 ## Environment Variables
 
 - `PORT`: Server port (default: 3000)
 - `HOST`: Bind address (default: `::` for dual-stack)
 - `AZURE_REGION`: Override region detection
 - Any of: `REGION_NAME`, `WEBSITE_REGION`, `REGION`, `LOCATION`
+
+Entra variant environment variables:
+
+- `ENTRA_TENANT_ID`: Tenant ID for the app registration
+- `ENTRA_CLIENT_ID`: Client ID for the app registration
+- `ENTRA_CLIENT_SECRET`: Client secret for the app registration
+- `PUBLIC_BASE_URL`: Public app URL used to derive the callback and logout redirect URIs
+- `ENTRA_REDIRECT_URI`: Optional explicit callback URI override
+- `ENTRA_POST_LOGOUT_REDIRECT_URI`: Optional explicit post-logout redirect URI
+- `ENTRA_AUTHORITY_HOST`: Optional authority host, defaults to `https://login.microsoftonline.com`
+- `ENTRA_SCOPES`: Optional scopes, defaults to `openid profile email offline_access`
+- `SESSION_SECRET`: Session signing secret
+- `SESSION_COOKIE_SECURE`: Set to `false` only for local non-HTTPS testing
 
 ## Building from Source
 

@@ -154,7 +154,7 @@ app.get('/api/me', requireAuth, (req, res) => {
   });
 });
 
-async function fetchImdsRegion(timeoutMs = 1000) {
+async function fetchImdsMetadata(timeoutMs = 1000) {
   return new Promise((resolve) => {
     const options = {
       host: '169.254.169.254',
@@ -170,7 +170,16 @@ async function fetchImdsRegion(timeoutMs = 1000) {
       response.on('end', () => {
         try {
           const json = JSON.parse(data);
-          resolve(json && json.compute && json.compute.location ? json.compute.location : null);
+          const compute = json && json.compute ? json.compute : null;
+          if (!compute) {
+            resolve(null);
+            return;
+          }
+
+          resolve({
+            region: compute.location || null,
+            vmName: compute.vmName || null
+          });
         } catch (err) {
           resolve(null);
         }
@@ -184,16 +193,29 @@ async function fetchImdsRegion(timeoutMs = 1000) {
   });
 }
 
-async function detectRegion() {
+async function detectRegionAndVmName() {
   const envCandidates = ['AZURE_REGION', 'REGION_NAME', 'WEBSITE_REGION', 'REGION', 'LOCATION'];
   for (const name of envCandidates) {
-    if (process.env[name]) return process.env[name];
+    if (process.env[name]) {
+      return {
+        region: process.env[name],
+        vmName: null
+      };
+    }
   }
 
-  const imds = await fetchImdsRegion();
-  if (imds) return imds;
+  const imds = await fetchImdsMetadata();
+  if (imds && imds.region) {
+    return {
+      region: imds.region,
+      vmName: imds.vmName
+    };
+  }
 
-  return 'local';
+  return {
+    region: 'local',
+    vmName: null
+  };
 }
 
 function isPrivateIP(ip) {
@@ -253,7 +275,9 @@ function getClientIp(req) {
 }
 
 app.get('/api/region', requireAuth, async (req, res) => {
-  const region = await detectRegion();
+  const runtimeMetadata = await detectRegionAndVmName();
+  const region = runtimeMetadata.region;
+  const vmName = runtimeMetadata.vmName;
   const clientIp = getClientIp(req);
   const xff = req.headers['x-forwarded-for'] || null;
   const remoteAddr = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : null;
@@ -261,6 +285,7 @@ app.get('/api/region', requireAuth, async (req, res) => {
 
   res.json({
     region,
+    vmName,
     clientIp,
     xForwardedFor: xff,
     remoteAddress: remoteAddr,
